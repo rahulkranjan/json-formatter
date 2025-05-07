@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>JSON Formatter + Ask Claude</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    #output.line-numbers {
+      counter-reset: linenumber;
+    }
+    #output.line-numbers span::before {
+      counter-increment: linenumber;
+      content: counter(linenumber);
+      display: inline-block;
+      width: 2rem;
+      margin-right: 1rem;
+      text-align: right;
+      color: #6b7280;
+    }
+    mark {
+      background-color: #facc15;
+      color: #000;
+    }
+  </style>
+</head>
+<body class="bg-gray-900 text-gray-100 min-h-screen p-6 relative">
+  <div class="max-w-6xl mx-auto">
+    <h1 class="text-3xl font-bold mb-6">JSON Formatter / Beautifier + Ask Claude</h1>
+
+    <div id="input-section" class="mb-6 transition-all">
+      <textarea id="input" class="w-full h-48 p-4 text-sm font-mono bg-gray-800 text-white rounded-lg border border-gray-700 mb-3" placeholder="Paste JSON or text here..."></textarea>
+      <div class="flex flex-col sm:flex-row gap-2 sm:items-center sm:justify-between">
+        <div class="flex flex-col sm:flex-row items-start sm:items-center gap-2">
+          <input id="highlightText" type="text" placeholder="Highlight text..." class="bg-gray-700 text-white px-3 py-2 rounded border border-gray-600 w-64"/>
+          <label class="flex items-center gap-2 text-sm">
+            <input type="checkbox" id="showLines" class="form-checkbox h-4 w-4 text-blue-500" />
+            Show Line Numbers
+          </label>
+        </div>
+        <button onclick="formatContent()" class="bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-4 rounded">Format</button>
+      </div>
+      <button onclick="toggleInput()" class="bg-red-600 hover:bg-red-700 text-white font-semibold py-2 px-4 rounded mt-3">Hide Input</button>
+    </div>
+
+    <button id="show-button" onclick="toggleInput()" class="hidden bg-green-600 hover:bg-green-700 text-white font-semibold py-2 px-4 rounded mb-4">Show Input</button>
+
+    <h2 class="text-2xl font-semibold mb-3">Output:</h2>
+    <div class="bg-gray-800 border border-gray-700 rounded-lg overflow-auto text-sm font-mono text-green-300 max-h-[70vh]">
+      <pre class="whitespace-pre-wrap p-4"><code id="output"></code></pre>
+    </div>
+  </div>
+
+  <!-- Floating Chat Button -->
+  <button onclick="toggleChatModal()" class="fixed bottom-6 right-6 bg-purple-600 hover:bg-purple-700 text-white px-4 py-3 rounded-full shadow-lg z-50">Ask AI</button>
+
+  <!-- Modal Chat Box -->
+  <div id="chat-modal" class="fixed inset-0 bg-black bg-opacity-50 hidden justify-center items-center z-50">
+    <div class="bg-gray-800 p-6 rounded-lg w-full max-w-2xl">
+      <div class="flex justify-between items-center mb-4">
+        <h3 class="text-xl font-semibold">Ask Claude About This JSON</h3>
+        <button onclick="toggleChatModal()" class="text-gray-400 hover:text-white text-2xl">&times;</button>
+      </div>
+      <input id="api-key" type="password" placeholder="Enter your Claude API Key..." class="w-full p-3 mb-3 bg-gray-700 text-white rounded-lg border border-gray-600" />
+      <textarea id="chat-question" placeholder="Ask something about the data..." class="w-full p-3 text-sm font-mono bg-gray-700 text-white rounded-lg border border-gray-600 mb-4"></textarea>
+      <button onclick="askClaude()" class="bg-purple-600 hover:bg-purple-700 text-white font-semibold py-2 px-4 rounded">Ask Claude</button>
+      <div id="chat-response" class="mt-4 bg-gray-700 text-white p-4 rounded border border-gray-600 min-h-[100px]"></div>
+    </div>
+  </div>
+
+  <script>
+    function formatContent() {
+      const input = document.getElementById('input').value;
+      const output = document.getElementById('output');
+      const highlightText = document.getElementById('highlightText').value.trim();
+      const showLines = document.getElementById('showLines').checked;
+
+      let formatted = '';
+      try {
+        const parsed = JSON.parse(input);
+        formatted = JSON.stringify(parsed, null, 2);
+      } catch (e) {
+        try {
+          const evaluated = eval('(' + input + ')');
+          formatted = JSON.stringify(evaluated, null, 2);
+        } catch (e2) {
+          let indent = 0;
+          const indentChar = '  ';
+          for (let i = 0; i < input.length; i++) {
+            const char = input[i];
+            if (char === '{' || char === '[') {
+              formatted += char + '\n' + indentChar.repeat(++indent);
+            } else if (char === '}' || char === ']') {
+              formatted += '\n' + indentChar.repeat(--indent) + char;
+            } else if (char === ',') {
+              formatted += char + '\n' + indentChar.repeat(indent);
+            } else {
+              formatted += char;
+            }
+          }
+        }
+      }
+
+      if (highlightText.length > 0) {
+        const escaped = highlightText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const regex = new RegExp(`(${escaped})`, 'gi');
+        formatted = formatted.replace(regex, '<mark>$1</mark>');
+      }
+
+      const lines = formatted.split('\n');
+      const outputContainer = document.getElementById('output');
+      outputContainer.classList.toggle('line-numbers', showLines);
+      outputContainer.innerHTML = lines.map(line => `<span class="block">${line}</span>`).join('');
+    }
+
+    async function askClaude() {
+      const question = document.getElementById('chat-question').value;
+      const rawJson = document.getElementById('input').value;
+      const apiKey = document.getElementById('api-key').value.trim();
+      const responseBox = document.getElementById('chat-response');
+
+      if (!apiKey) {
+        responseBox.textContent = 'Please enter your Claude API key.';
+        return;
+      }
+
+      responseBox.textContent = 'Asking Claude...';
+
+      try {
+        const response = await fetch("https://api.anthropic.com/v1/messages", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-api-key": apiKey,
+            "anthropic-version": "2023-06-01"
+          },
+          body: JSON.stringify({
+            model: "claude-3-opus-20240229",
+            max_tokens: 1024,
+            messages: [
+              {
+                role: "user",
+                content: `Here is some JSON data:\n\n${rawJson}\n\nQuestion: ${question}`
+              }
+            ]
+          })
+        });
+
+        const data = await response.json();
+        const reply = data?.content?.[0]?.text || "No reply received.";
+        responseBox.textContent = reply;
+      } catch (err) {
+        responseBox.textContent = 'Error talking to Claude (likely CORS issue).';
+        console.error(err);
+      }
+    }
+
+    function toggleInput() {
+      const inputSection = document.getElementById('input-section');
+      const showButton = document.getElementById('show-button');
+      inputSection.classList.toggle('hidden');
+      showButton.classList.toggle('hidden');
+    }
+
+    function toggleChatModal() {
+      const modal = document.getElementById('chat-modal');
+      modal.classList.toggle('hidden');
+      modal.classList.toggle('flex');
+    }
+  </script>
+</body>
+</html>
